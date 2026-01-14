@@ -280,5 +280,191 @@
             const grid = document.getElementById('grid');
             
             const sortedTools = [...tools].sort((a, b) => {
-                return (pinnedTools.includes(b.id) ? 1 : 
+                return (pinnedTools.includes(b.id) ? 1 : 0) - (pinnedTools.includes(a.id) ? 1 : 0);
+            });
 
+            grid.innerHTML = sortedTools.filter(item => {
+                const name = (t.tools[item.id] || item.id).toLowerCase();
+                return name.includes(q.toLowerCase());
+            }).map(item => `
+                <div class="card" onclick="checkToolAccess('${item.id}', ${item.premium})">
+                    <i class="fas fa-star pin-btn ${pinnedTools.includes(item.id) ? 'pinned' : ''}" onclick="togglePin(event, '${item.id}')"></i>
+                    ${item.premium && !unlockedPremium ? '<div class="lock-overlay"><i class="fas fa-lock lock-icon"></i></div>' : ''}
+                    <div class="icon-3d" style="--tool-color: ${item.color}">
+                        <i class="${item.icon}"></i>
+                    </div>
+                    <h3>${(t.tools[item.id] || item.id).toUpperCase()}</h3>
+                    <span class="badge" style="--tool-color: ${item.color}">${item.premium ? 'PREMIUM' : 'PRO'}</span>
+                </div>
+            `).join('');
+        }
+        renderTools();
+
+        // --- Logic: Premium & Vault ---
+        function checkToolAccess(id, isPremium) {
+            if (isPremium && !unlockedPremium) {
+                document.getElementById('keyModal').style.display = 'flex';
+            } else {
+                startGate(id);
+            }
+        }
+
+        function verifyKey() {
+            const input = document.getElementById('dailyKeyInput').value;
+            if (input === DAILY_KEY) {
+                alert("تم تفعيل العضوية المميزة لهذا اليوم! 🔓");
+                localStorage.setItem('nexus_key_date', new Date().toDateString());
+                unlockedPremium = true;
+                document.getElementById('keyModal').style.display = 'none';
+                renderTools();
+            } else {
+                alert("كود خاطئ! تأكد من زيارة الرابط.");
+            }
+        }
+
+        function getKeyLink() {
+            window.open(DIRECT_LINK, '_blank');
+            alert(`كود اليوم هو: ${DAILY_KEY}\n(انسخه وعد لإدخاله)`);
+        }
+
+        // Vault Logic
+        let vaultGateOpened = false;
+        function openVaultGate() {
+            // First time per session: Show Ad Gate
+            if (!vaultGateOpened) {
+                window.open(DIRECT_LINK, '_blank'); // Open Ad
+                document.getElementById('modal').style.display = 'flex';
+                document.getElementById('mTitle').innerText = "SECURE VAULT";
+                document.getElementById('loadingGate').style.display = 'flex';
+                document.getElementById('adGate').style.display = 'none';
+                document.getElementById('toolContent').style.display = 'none';
+                
+                setTimeout(() => {
+                    document.getElementById('loadingGate').style.display = 'none';
+                    document.getElementById('adGate').style.display = 'block';
+                    startTimer(true); // Special timer for vault
+                }, 2000);
+            } else {
+                document.getElementById('vaultModal').style.display = 'flex';
+            }
+        }
+
+        function unlockVaultData() {
+            const pin = document.getElementById('vaultPin').value;
+            if(!pin) return alert("أدخل PIN");
+            
+            try {
+                const encrypted = localStorage.getItem('nexus_vault_data');
+                if(encrypted) {
+                    const bytes = CryptoJS.AES.decrypt(encrypted, pin);
+                    const originalText = bytes.toString(CryptoJS.enc.Utf8);
+                    if(!originalText && encrypted.length > 0) throw "Wrong PIN";
+                    document.getElementById('vaultData').value = originalText;
+                }
+                document.getElementById('vaultAuth').style.display = 'none';
+                document.getElementById('vaultContent').style.display = 'block';
+            } catch(e) {
+                alert("رمز PIN خاطئ!");
+            }
+        }
+
+        function saveVaultData() {
+            const data = document.getElementById('vaultData').value;
+            const pin = document.getElementById('vaultPin').value;
+            const encrypted = CryptoJS.AES.encrypt(data, pin).toString();
+            localStorage.setItem('nexus_vault_data', encrypted);
+            document.getElementById('vaultStatus').innerText = "تم الحفظ والتشفير بنجاح ✅";
+        }
+
+        function closeVault() { document.getElementById('vaultModal').style.display = 'none'; }
+
+        // --- Standard Gate Logic ---
+        let timeLeft = 30, adClicked = false, timerDone = false, adOpenTime = 0, isAdOpen = false, gateInterval;
+        let isVaultGate = false;
+
+        window.addEventListener('blur', () => {
+            if (document.getElementById('adGate').style.display === 'block') {
+                isAdOpen = true; adOpenTime = performance.now();
+                window.open(DIRECT_LINK, '_blank'); 
+                document.getElementById('clickStat').className = 'status-yellow';
+                document.getElementById('clickStat').innerHTML = '...';
+            }
+        });
+
+        window.addEventListener('focus', () => {
+            if (isAdOpen) {
+                const elapsed = performance.now() - adOpenTime;
+                isAdOpen = false;
+                if (elapsed >= MIN_TIME) { adClicked = true; checkGate(); }
+                else { alert("يجب البقاء 30 ثانية!"); adClicked = false; document.getElementById('clickStat').className = 'status-red'; }
+            }
+        });
+
+        function startGate(id) {
+            isVaultGate = false;
+            window.open(DIRECT_LINK, '_blank');
+            const t = i18n[curLang] || i18n.en;
+            document.getElementById('modal').style.display = 'flex';
+            document.getElementById('mTitle').innerText = (t.tools[id] || id).toUpperCase();
+            document.getElementById('loadingGate').style.display = 'flex';
+            document.getElementById('adGate').style.display = 'none';
+            document.getElementById('toolContent').style.display = 'none';
+
+            setTimeout(() => {
+                document.getElementById('loadingGate').style.display = 'none';
+                document.getElementById('adGate').style.display = 'block';
+                startTimer();
+            }, 2500);
+
+            // Populate Tool
+            document.getElementById('mBody').innerHTML = `<input class="input" placeholder="البيانات..."><button class="btn-tool">بدء</button><div class="res-box">...</div>`;
+        }
+
+        function startTimer(forVault = false) {
+            isVaultGate = forVault;
+            timeLeft = 30; timerDone = false; adClicked = false;
+            clearInterval(gateInterval);
+            gateInterval = setInterval(() => {
+                timeLeft--;
+                document.getElementById('timeStat').innerText = timeLeft + 's';
+                if(timeLeft <= 0) { clearInterval(gateInterval); timerDone = true; checkGate(); }
+            }, 1000);
+        }
+
+        function checkGate() {
+            if(timerDone && adClicked) {
+                document.getElementById('stealthBox').style.display = 'none';
+                document.getElementById('realBtn').style.display = 'block';
+                document.getElementById('clickStat').className = 'status-green';
+                document.getElementById('clickStat').innerText = 'تم!';
+            }
+        }
+
+        function unlockTool() {
+            userPoints += 50; localStorage.setItem('nexus_pts', userPoints);
+            document.getElementById('points').innerText = userPoints;
+            document.getElementById('adGate').style.display = 'none';
+            
+            if(isVaultGate) {
+                vaultGateOpened = true;
+                document.getElementById('modal').style.display = 'none'; // Close gate
+                document.getElementById('vaultModal').style.display = 'flex'; // Open vault
+            } else {
+                document.getElementById('toolContent').style.display = 'block';
+                document.getElementById('cloudBtn').style.display = 'flex';
+            }
+        }
+
+        // Utils
+        function togglePin(e, id) { e.stopPropagation(); if(pinnedTools.includes(id)) pinnedTools = pinnedTools.filter(i=>i!==id); else pinnedTools.push(id); localStorage.setItem('nexus_pinned', JSON.stringify(pinnedTools)); renderTools(); }
+        function toggleHistory() { document.getElementById('historyPanel').classList.toggle('open'); }
+        function saveToHistory() { const id = document.getElementById('mTitle').innerText; history.unshift({id, time: new Date().toLocaleTimeString()}); localStorage.setItem('nexus_hist', JSON.stringify(history)); renderHistory(); alert("Saved!"); }
+        function renderHistory() { document.getElementById('historyList').innerHTML = history.map(h => `<div class="hist-item"><span>${h.id}</span><span>${h.time}</span></div>`).join(''); }
+        function openStore() { document.getElementById('storeModal').style.display = 'flex'; document.getElementById('storePoints').innerText = userPoints; }
+        function earnPoints() { window.open(DIRECT_LINK, '_blank'); setTimeout(() => { userPoints += 100; localStorage.setItem('nexus_pts', userPoints); document.getElementById('points').innerText = userPoints; document.getElementById('storePoints').innerText = userPoints; alert('+100 XP'); }, 5000); }
+        function cloudSave() { window.open(DIRECT_LINK, '_blank'); }
+        function closeModal() { document.getElementById('modal').style.display = 'none'; }
+        function changeLang(l) { curLang = l; renderTools(); }
+    </script>
+</body>
+</html>
